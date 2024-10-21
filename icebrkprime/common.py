@@ -33,7 +33,7 @@ def load_root_file(root_path, ids=None, entry_start=0, entry_stop=None, maxevent
     inputvars = import_module("configs." + args["rootname"] + "." + args["inputvars"])
     
     if type(root_path) is list:
-        root_path = root_path[0] # Remove [] list, we expect only the path here (no files)
+        root_path = root_path[0]  # Remove [] list, we expect only the path here (no files)
     
     # -----------------------------------------------
     param = {
@@ -46,33 +46,29 @@ def load_root_file(root_path, ids=None, entry_start=0, entry_stop=None, maxevent
     # =================================================================
     # *** MC (signal) ***
     
-    rootfile      = f'{root_path}/{args["mcfile"]}'
+    rootfile = f'{root_path}/{args["mcfile"]}'
     
     # e1
-    X_MC, VARS_MC = process_root(rootfile=rootfile, tree='tree', isMC='mode_e1', **param)
+    X_MC, VARS_MC, weights_MC_e1 = process_root(rootfile=rootfile, tree='tree', isMC='mode_e1', **param)
     
     X_MC_e1 = X_MC[:, [VARS_MC.index(name.replace("x_", "x_")) for name in inputvars.NEW_VARS]]
     Y_MC_e1 = np.ones(X_MC_e1.shape[0], dtype=int)
     
-    
     # e2
-    X_MC, VARS_MC = process_root(rootfile=rootfile, tree='tree', isMC='mode_e2', **param)
+    X_MC, VARS_MC, weights_MC_e2 = process_root(rootfile=rootfile, tree='tree', isMC='mode_e2', **param)
     
     X_MC_e2 = X_MC[:, [VARS_MC.index(name.replace("x_", "x_")) for name in inputvars.NEW_VARS]]
     Y_MC_e2 = np.ones(X_MC_e2.shape[0], dtype=int)
     
-    
     # =================================================================
     # *** DATA (background) ***
 
-    rootfile          = f'{root_path}/{args["datafile"]}'
+    rootfile = f'{root_path}/{args["datafile"]}'
 
-
-    X_DATA, VARS_DATA = process_root(rootfile=rootfile, tree='tree', isMC='data', **param)
+    X_DATA, VARS_DATA, weights_DATA = process_root(rootfile=rootfile, tree='tree', isMC='data', **param)
 
     X_DATA = X_DATA[:, [VARS_DATA.index(name.replace("x_", "x_")) for name in inputvars.NEW_VARS]]
     Y_DATA = np.zeros(X_DATA.shape[0], dtype=int)
-    
     
     # =================================================================
     # Finally combine
@@ -80,25 +76,32 @@ def load_root_file(root_path, ids=None, entry_start=0, entry_stop=None, maxevent
     X = np.concatenate((X_MC_e1, X_MC_e2, X_DATA), axis=0)
     Y = np.concatenate((Y_MC_e1, Y_MC_e2, Y_DATA), axis=0)
     
-    # Trivial weights
-    W = np.ones(len(X))
+    # Option 1: Use the standard print function for debugging
+    import builtins
+    builtins.print(str(weights_MC_e1.tolist()), str(weights_MC_e2.tolist()), str(weights_DATA.tolist()))
+    
+    # Option 2: Format the message appropriately
+    # message = f"{str(weights_MC_e1.tolist())}, {str(weights_MC_e2.tolist())}, {str(weights_DATA.tolist())}"
+    # print(message)
+    
+    W = np.concatenate((weights_MC_e1, weights_MC_e2, weights_DATA), axis=0)
 
     # ** Crucial -- randomize order to avoid problems with other functions **
     rand = np.random.permutation(len(X))
-    X    = X[rand].squeeze() # Squeeze removes additional [] dimension
-    Y    = Y[rand].squeeze()
-    W    = W[rand].squeeze()
+    X = X[rand].squeeze()  # Squeeze removes additional [] dimension
+    Y = Y[rand].squeeze()
+    W = W[rand].squeeze()
     
     # =================================================================
     # Custom treat specific variables
 
-    #ind      = inputvars.NEW_VARS.index('x_hlt_pms2')
-    #X[:,ind] = np.clip(a=np.asarray(X[:,ind]), a_min=-1e10, a_max=1e10)
+    # ind = inputvars.NEW_VARS.index('x_hlt_pms2')
+    # X[:,ind] = np.clip(a=np.asarray(X[:,ind]), a_min=-1e10, a_max=1e10)
 
     # TBD add info about cut stats etc
     info = {}
     
-    return {'X':X, 'Y':Y, 'W':W, 'ids':inputvars.NEW_VARS, 'info':info}
+    return {'X': X, 'Y': Y, 'W': W, 'ids': inputvars.NEW_VARS, 'info': info}
 
 
 def process_root(rootfile, tree, isMC, args, entry_start=0, entry_stop=None, maxevents=None):
@@ -107,15 +110,21 @@ def process_root(rootfile, tree, isMC, args, entry_start=0, entry_stop=None, max
     FILTERFUNC = globals()[args['filterfunc']]
 
     # Load files
-    X,ids = iceroot.load_tree(rootfile=rootfile, tree=tree,
+    X, ids = iceroot.load_tree(rootfile=rootfile, tree=tree,
         entry_start=entry_start, entry_stop=entry_stop, maxevents=maxevents, ids=None, library='np', num_cpus=args['num_cpus'])
+    
+    # Load weights
+    weights, _ = iceroot.load_tree(rootfile=rootfile, tree=tree,
+        entry_start=entry_start, entry_stop=entry_stop, maxevents=maxevents, ids=['wt_sf'], library='np', num_cpus=args['num_cpus'])
+    weights = np.ravel(weights).astype(np.float64)
     
     # @@ Filtering done here @@
     mask = FILTERFUNC(X=X, ids=ids, isMC=isMC, xcorr_flow=args['xcorr_flow'])
     #plots.plot_selection(X=X, mask=mask, ids=ids, plotdir=args['plotdir'], label=f'<filterfunc>_{isMC}', varlist=CUT_VARS)
     print(f'isMC = {isMC} | <filterfunc> before: {len(X)}, after: {sum(mask)} events ', 'green')
     
-    X   = X[mask]
+    X       = X[mask]
+    weights = weights[mask]
     prints.printbar()
     
     # @@ Observable cut selections done here @@
@@ -123,11 +132,12 @@ def process_root(rootfile, tree, isMC, args, entry_start=0, entry_stop=None, max
     #plots.plot_selection(X=X, mask=mask, ids=ids, plotdir=args['plotdir'], label=f'<cutfunc>_{isMC}', varlist=CUT_VARS)
     print(f"isMC = {isMC} | <cutfunc>    before: {len(X)}, after: {sum(mask)} events \n", 'green')
     
-    X   = X[mask]
+    X       = X[mask]
+    weights = weights[mask]
     io.showmem()
     prints.printbar()
 
-    return X, ids
+    return X, ids, weights
 
 
 def splitfactor(x, y, w, ids, args):
