@@ -1,0 +1,11 @@
+Universe   = vanilla
+executable = /vols/cms/ia2318/icenet/runme_brkprime.sh
+Arguments  = "$(PROCESS) 10"
+output = /vols/cms/ia2318/icenet/output/outputfile.$(CLUSTER)
+error = /vols/cms/ia2318/icenet/output/errorfile.$(CLUSTER)
+log = /vols/cms/ia2318/icenet/output/example.job.$(CLUSTER).log
+request_gpus   = 1
+request_memory = 160G
+requirements   = TARGET.GPUs_DeviceName =?= "Tesla V100-PCIE-32GB"
++MaxRuntime    = 86000 
+queue
