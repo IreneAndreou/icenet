@@ -58,8 +58,8 @@ genesis_runmode:
   maxevents:  null
   inputmap:   null # "mc_input.yml"
   
-  mcfile:     'data/DY2JetsToLL-LO_zmm_2018_100000events.root'
-  datafile:   'data/SingleMuonC_zmm_2018_100000events.root'
+  mcfile:    'data/Tau_mc_events.root' #'data/sampled/DY_all_events.root'
+  datafile:  'data/Tau_data_events.root' #'data/sampled/SingleMuon_all_events.root'
   tree_name:  null                    # 'ntuplizer/tree'
 
   targetfunc: null                    # Training target,    implemented under mctargets.py
@@ -82,7 +82,7 @@ train_runmode:
     concat_max_pickle: 32           # (technical) [Recursive] concatenation max size, adjust this if encounter problems e.g. with awkward ("127 limit")
   
   ## Reweighting setup
-  reweight: false
+  reweight: false                  #  TODO: Implement reweighting
   reweight_mode: 'write'          # 'write', 'load'
   reweight_file: null                 # null for automatic, or string for specific
   
@@ -105,24 +105,24 @@ train_runmode:
       maxevents: null                   # Maximum number of events for the PDF construction
       renorm_weight_to_count: false      # Renormalize sum(weights) == sum(counts) per class
       
-      var:   ['x_hlt_pt', 'x_hlt_eta']
-      type: '2D'                        # 'AIRW', 'pseudo-ND', '2D', '1D'
+      var:   ['wt_sf']
+      type: '1D'                        # 'AIRW', 'pseudo-ND', '2D', '1D'
       
       hist_param:
 
         pseudo_type: 'product'          # 'product', 'geometric_mean'
 
         # Make sure the bounds cover the phase space
-        bins:  [[0.001, 100.0, 150], [-3.1, 3.1, 150]]
-        binmode: ['linear', 'linear']   # 'log10', 'linear' or 'edges' for custom array based binning
+        bins:  [[0.0, 4.0, 100]]
+        binmode: ['linear']   # 'log10', 'linear' or 'edges' for custom array based binning
         
         # ! Variable, and binning min/max boundaries are both transformed !
-        transform: ['log10', null]      # 'log10', 'sqrt', 'square', null
+        transform: [null]      # 'log10', 'sqrt', 'square', null
 
         max_reg: 10000.0                # Maximum weight cut-off regularization
       
       AIRW_param:
-        active_model: xgb3Drw           # Under models.yml
+        active_model: xgb0           # Under models.yml
         max_reg:      1000.0            # Maximum weight cut-off regularization
         mode:         'LR'              # 'LR', 'inverse-LR', 'DeepEfficiency', 'direct'
 
@@ -142,9 +142,9 @@ train_runmode:
   active_models: &ACTIVE_MODELS
     
     - xgb0
-    #- dmlp0
+    # - dmlp0
     
-    #- xgb1
+    # - xgb1
     
     #- cut0
     #- cut1
