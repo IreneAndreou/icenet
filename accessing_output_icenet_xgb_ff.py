@@ -11,7 +11,8 @@ from matplotlib.gridspec import GridSpec
 #file_path = 'checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-18_10-00-14_lx06/XGB/XGB_55.pkl'  # best model
 #file_path = 'checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-18_15-30-30_lx06/XGB/XGB_55.pkl'
 #file_path  = 'checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-18_16-45-51_lx06/XGB/XGB_42.pkl'  # Found the best model at epoch [42] with validation loss = 0.6295
-file_path = 'checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-21_11-13-51_lx06/XGB/XGB_34.pkl'  # Found the best model at epoch [34] with validation loss = 0.6295
+#file_path = 'checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-21_11-13-51_lx06/XGB/XGB_34.pkl'  # Found the best model at epoch [34] with validation loss = 0.6295
+file_path = 'checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-21_15-52-53_lx06/XGB/XGB_44.pkl'  # Found the best model at epoch [44] with validation loss = 0.6308
 
 with open(file_path, 'rb') as file:
     data = pickle.load(file)
