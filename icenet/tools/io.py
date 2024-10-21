@@ -191,7 +191,7 @@ def glob_expand_files(datasets, datapath, recursive_glob=False):
 def showmem(color='red'):
     print(f"""Process RAM: {process_memory_use():0.2f} GB [total RAM in use {psutil.virtual_memory()[2]} %]""", color)
 
-def showmem_cuda(device, color='red'):
+def showmem_cuda(device='cuda:0', color='red'):
     print(f"Process RAM: {process_memory_use():0.2f} GB [total RAM in use {psutil.virtual_memory()[2]} %] | VRAM usage: {get_gpu_memory_map()} GB [total VRAM {torch_cuda_total_memory(device):0.2f} GB]", color)
 
 
@@ -202,19 +202,24 @@ def get_gpu_memory_map():
         dictionary with keys as device ids [integers]
         and values the memory used by the GPU.
     """
-    result = subprocess.check_output(
-        [
-            'nvidia-smi', '--query-gpu=memory.used',
-            '--format=csv,nounits,noheader'
-        ], encoding='utf-8')
+    try:
+        
+        result = subprocess.check_output(
+            [
+                'nvidia-smi', '--query-gpu=memory.used',
+                '--format=csv,nounits,noheader'
+            ], encoding='utf-8')
 
-    # into dictionary
-    gpu_memory = [int(x)/1024.0 for x in result.strip().split('\n')]
-    gpu_memory_map = dict(zip(range(len(gpu_memory)), gpu_memory))
-    return gpu_memory_map
+        # into dictionary
+        gpu_memory = [int(x)/1024.0 for x in result.strip().split('\n')]
+        gpu_memory_map = dict(zip(range(len(gpu_memory)), gpu_memory))
+        return gpu_memory_map
+    
+    except Exception as e:
+        print(f'Error: Could not run nvidia-smi: {e}')
+        return None
 
-
-def torch_cuda_total_memory(device):
+def torch_cuda_total_memory(device='cuda:0'):
     """
     Return CUDA device VRAM available in GB.
     """

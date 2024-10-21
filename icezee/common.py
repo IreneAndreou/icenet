@@ -6,6 +6,7 @@ import numpy as np
 import copy
 from importlib import import_module
 import pandas as pd
+import os
 
 from icenet.tools import io
 from icenet.tools import aux
@@ -18,11 +19,17 @@ from icenet import print
 #from configs.zee.cuts import *
 #from configs.zee.filter import *
 
-def load_helper(mcfiles, datafiles, maxevents, args):
+def truncate(X,Y,W,maxevents):
 
-    print(__name__ + '.load_helper:')
-    print(f'{mcfiles}')
-    print(f'{datafiles}')
+    # Apply maxevents cutoff
+    maxevents = np.min([maxevents, len(X)])
+    if maxevents < len(X):
+        print(f'Applying maxevents cutoff {maxevents}')
+        X, Y, W = X[0:maxevents], Y[0:maxevents], W[0:maxevents]
+    
+    return X,Y,W   
+
+def load_helper(mcfiles, datafiles, maxevents, args):
     
     inputvars = import_module("configs." + args["rootname"] + "." + args["inputvars"])
     LOAD_VARS = inputvars.LOAD_VARS
@@ -54,6 +61,8 @@ def load_helper(mcfiles, datafiles, maxevents, args):
     print(f'X_MC.shape = {X_MC.shape}')
     print(f'W_MC.shape = {W_MC.shape}')
     
+    # Apply maxevents cutoff
+    X_MC, Y_MC, W_MC = truncate(X=X_MC, Y=Y_MC, W=W_MC, maxevents=maxevents)
     
     # -------------------------------------------------------------------------
     # *** Data ***
@@ -63,7 +72,7 @@ def load_helper(mcfiles, datafiles, maxevents, args):
     for f in datafiles:
         new_frame = copy.deepcopy(pd.read_parquet(f))
         frames.append(new_frame)
-        print(__name__ + f'.load_helper: {f} | N = {len(new_frame)}', 'yellow')
+        print(f'{f} | N = {len(new_frame)}', 'yellow')
         ids = list(new_frame.keys()); ids.sort()
         print(ids)
     
@@ -89,6 +98,9 @@ def load_helper(mcfiles, datafiles, maxevents, args):
     print(f'X_data.shape = {X_data.shape}')
     print(f'W_data.shape = {W_data.shape}')
     
+    # Apply maxevents cutoff
+    X_data, Y_data, W_data = truncate(X=X_data, Y=Y_data, W=W_data, maxevents=maxevents)
+    
     # -------------------------------------------------------------------------
     # Combine MC and Data samples
     
@@ -99,7 +111,7 @@ def load_helper(mcfiles, datafiles, maxevents, args):
     ids = LOAD_VARS # We use these
     
     ## -------------------------------------------------
-    # ** Drop negative weight events **
+    # ** Drop negative weight (MC) events **
     if args['drop_negative']:
         ind = W < 0
         if np.sum(ind) > 0:
@@ -108,27 +120,31 @@ def load_helper(mcfiles, datafiles, maxevents, args):
             W = W[~ind] # Boolean NOT
             Y = Y[~ind]
     
-    # -------------------------------------------------------------------------
-    # ** Randomize MC vs Data order to avoid problems with other functions **
-    rand = np.random.permutation(len(X))
-    X    = X[rand].squeeze() # Squeeze removes additional [] dimension
-    Y    = Y[rand].squeeze()
-    W    = W[rand].squeeze()
-    # -------------------------------------------------------------------------
-    
-    # Apply maxevents cutoff
-    maxevents = np.min([maxevents, len(X)])
-    if maxevents < len(X):
-        print(f'Applying maxevents cutoff {maxevents}')
-        X, Y, W = X[0:maxevents], Y[0:maxevents], W[0:maxevents]
-    
     # Re-nenormalize MC to the event count
     ind    = (Y == 0)
     W[ind] = W[ind] / np.sum(W[ind]) * len(W[ind])
     ## -------------------------------------------------
-
+    
+    # -------------------------------------------------------------------------
+    # ** Randomize MC vs Data order to avoid problems with other functions **
+    # ** No need to randomize in this application. We have fixed (eval, validate, test) file structure **
+    
+    #rand = np.random.permutation(len(X))
+    #X    = X[rand].squeeze() # Squeeze removes additional [] dimension
+    #Y    = Y[rand].squeeze()
+    #W    = W[rand].squeeze()
+    # -------------------------------------------------------------------------
+    
+    # -------------------------------------------------------------------------
+    ## Add event weights as an aux variable called `raw_weight` for plots etc.
+    
+    X   = np.hstack((X, W[None].T))
+    ids = ids + ['raw_weight']
+    
+    # -------------------------------------------------------------------------
+    
     ## Print some diagnostics
-    print(f'Number of events: {len(X)}')
+    print(f'Total number of events: {len(X)}')
     
     for c in np.unique(Y):
         print(f'class[{c}] | N = {np.sum(Y == c)} | weight[mean,std,min,max] = {np.mean(W[Y==c]):0.3E}, {np.std(W[Y==c]):0.3E}, {np.min(W[Y==c]):0.3E}, {np.max(W[Y==c]):0.3E}')
@@ -176,8 +192,16 @@ def load_root_file(root_path, ids=None, entry_start=0, entry_stop=None, maxevent
     
     for mode in ['trn', 'val', 'tst']:
         
+        # Glob expansion type (be careful not to have "label noise" under the folder or subfolders)
         mc_files  = io.glob_expand_files(datasets=args["mcfile"][mode],   datapath=root_path)
         da_files  = io.glob_expand_files(datasets=args["datafile"][mode], datapath=root_path)
+        
+        # Simple fixed one file
+        #mc_files = [os.path.join(root_path, args['mcfile'][mode][0])]
+        #da_files = [os.path.join(root_path, args['mcfile'][mode][0])]
+        
+        print(f'Found mcfiles:   {mc_files}')
+        print(f'Found datafiles: {da_files}')
         
         X[mode],Y[mode],W[mode],ids = load_helper(mcfiles=mc_files, datafiles=da_files, maxevents=maxevents, args=args)
         running_split[mode] = np.arange(N_prev, len(X[mode]) + N_prev)
@@ -210,11 +234,11 @@ def splitfactor(x, y, w, ids, args):
     data = io.IceXYW(x=x, y=y, w=w, ids=ids)
 
     # -------------------------------------------------------------------------
-    ### Pick kinematic variables out
+    ### Pick kinematic variables out (note also 'raw_weight')
     data_kin = None
 
     if inputvars.KINEMATIC_VARS is not None:
-        vars       = aux.process_regexp_ids(all_ids=data.ids, ids=inputvars.KINEMATIC_VARS)
+        vars       = aux.process_regexp_ids(all_ids=data.ids, ids=inputvars.KINEMATIC_VARS + ['raw_weight'])
         data_kin   = data[vars]
         data_kin.x = data_kin.x.astype(np.float32)
     
@@ -266,7 +290,5 @@ def splitfactor(x, y, w, ids, args):
             
             # Change the variable name [+ have the same original variables in data_kin]
             data.ids[ind] = f'TRF__{v}'
-    
-    # -------------------------------------------------------------------------
     
     return {'data': data, 'data_MI': data_MI, 'data_kin': data_kin, 'data_deps': data_deps, 'data_tensor': data_tensor, 'data_graph': data_graph}

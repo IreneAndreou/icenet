@@ -20,7 +20,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from importlib import import_module
 import os
-import copy
 import pickle
 import xgboost
 
@@ -105,7 +104,7 @@ def read_config(config_path='configs/xyz/', runmode='all'):
 
     args = {}
     config_yaml_file = cli.config
-    with open(f'{cwd}/{config_path}/{config_yaml_file}', 'r') as f:
+    with open(os.path.join(cwd, config_path, config_yaml_file), 'r') as f:
         try:
             args = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -130,7 +129,7 @@ def read_config(config_path='configs/xyz/', runmode='all'):
         yaml = YAML()
         yaml.allow_duplicate_keys = True
 
-        with open(f'{cwd}/{config_path}/{file}', 'r') as f:
+        with open(os.path.join(cwd, config_path, file), 'r') as f:
             try:
                 inputmap = yaml.load(f)
 
@@ -223,9 +222,9 @@ def read_config(config_path='configs/xyz/', runmode='all'):
     hash_args = {}
 
     # Critical Python files content
-    files = {'cuts':      f'{cwd}/{config_path}/cuts.py',
-             'filter':    f'{cwd}/{config_path}/filter.py',
-             'inputvars': f'{cwd}/{config_path}/{args["inputvars"]}.py'}
+    files = {'cuts':      os.path.join(cwd, config_path, 'cuts.py'),
+             'filter':    os.path.join(cwd, config_path, 'filter.py'),
+             'inputvars': os.path.join(cwd, config_path, f'{args["inputvars"]}.py')}
     
     for key in files.keys():
         if os.path.exists(files[key]):
@@ -241,7 +240,7 @@ def read_config(config_path='configs/xyz/', runmode='all'):
     hash_args['maxevents'] = args['maxevents']
     hash_args['inputvars'] = args['inputvars']
     hash_args.update(inputmap)
-
+    
     # Finally create the hash
     args['__hash_genesis__'] = io.make_hash_sha256_object(hash_args)
     
@@ -351,7 +350,7 @@ def read_config(config_path='configs/xyz/', runmode='all'):
         args['plotdir']  = aux.makedir(f"{args['plotdir']}/{run_id}")
         
         if runmode == 'eval' and cli_dict['evaltag'] is not None:
-            args['plotdir'] = aux.makedir(f"{args['plotdir']}/{run_id}/evaltag__{cli_dict['evaltag']}")
+            args['plotdir'] = aux.makedir(f"{args['plotdir']}/evaltag__{cli_dict['evaltag']}")
             print(f'Changing eval plotdir to: {args["plotdir"]}', 'red')
         
         # ----------------------------------------------------------------
@@ -367,6 +366,7 @@ def read_config(config_path='configs/xyz/', runmode='all'):
     # -------------------------------------------------------------------
     # Technical
     
+    args['__runmode__']         = cli_dict['runmode']
     args['__use_cache__']       = bool(cli_dict['use_cache'])
     args['__compute__']         = bool(cli_dict['compute'])
     args['__raytune_running__'] = False
@@ -392,7 +392,7 @@ def read_config(config_path='configs/xyz/', runmode='all'):
     
     # -------------------------------------------------------------------
     # Set random seeds for reproducability and train-validate-test splits
-
+    
     print('')
     print(" torch.__version__: " + torch.__version__)
 
@@ -420,39 +420,43 @@ def generic_flow(rootname, func_loader, func_factor):
     
     args, cli     = read_config(config_path=f'configs/{rootname}', runmode=runmode)
 
-    if runmode == 'genesis':
+    try:
         
-        icelogger.set_global_log_file(f'{args["datadir"]}/genesis_{args["__hash_genesis__"]}.log')
-        
-        read_data(args=args, func_loader=func_loader, runmode=runmode) 
-        
-    if runmode == 'train' or runmode == 'eval':
-
-        icelogger.set_global_log_file(f'{args["plotdir"]}/{runmode}/execution.log')
-        
-        data = read_data_processed(args=args, func_loader=func_loader,
-                func_factor=func_factor, mvavars=f'configs.{rootname}.mvavars', runmode=runmode)
-    
-    if args['__compute__']:
-        
-        if runmode == 'train':
+        if runmode == 'genesis':
             
+            icelogger.set_global_log_file(f'{args["datadir"]}/genesis_{args["__hash_genesis__"]}.log')
+            print(cli) # for output log
+            process_raw_data(args=args, func_loader=func_loader) 
+            
+        if runmode == 'train' or runmode == 'eval':
+            
+            icelogger.set_global_log_file(f'{args["plotdir"]}/{runmode}/execution.log')
+            print(cli) # for output log
+            data = train_eval_data_processor(args=args,
+                    func_factor=func_factor, mvavars=f'configs.{rootname}.mvavars', runmode=runmode)
+            
+        if runmode == 'train':
+
             output_file = f'{args["plotdir"]}/train/stats_train.log'
             prints.print_variables(X=data['trn']['data'].x, W=data['trn']['data'].w, ids=data['trn']['data'].ids, output_file=output_file)
-            
             make_plots(data=data['trn'], args=args, runmode=runmode)
             
-            train_models(data_trn=data['trn'], data_val=data['val'], args=args)
+            if args['__compute__']:
+                train_models(data_trn=data['trn'], data_val=data['val'], args=args)
 
         if runmode == 'eval':
             
             output_file = f'{args["plotdir"]}/eval/stats_evaluate.log'
-            prints.print_variables(X=data['tst']['data'].x, W=data['tst']['data'].w, ids=data['tst']['data'].ids, output_file=output_file)
-            
+            prints.print_variables(X=data['tst']['data'].x, W=data['tst']['data'].w, ids=data['tst']['data'].ids, output_file=output_file)        
             make_plots(data=data['tst'], args=args, runmode=runmode)
             
-            evaluate_models(data=data['tst'], info=data['info'], args=args)
-        
+            if args['__compute__']:
+                evaluate_models(data=data['tst'], info=data['info'], args=args)
+
+    except Exception as e:
+        print(e)
+        raise Exception(e)
+    
     return args, runmode
 
 # -------------------------------------------------------------------
@@ -508,13 +512,9 @@ def load_file_wrapper(index, filepath):
 # -------------------------------------------------------------------
 
 @iceprint.icelog(LOGGER)
-def read_data(args, func_loader, runmode):
+def process_raw_data(args, func_loader):
     """
-    Load input data and return full dataset arrays
-    
-    Args:
-        args:         main argument dictionary
-        func_loader:  application specific root file loader function
+    Load raw input from the disk -- this is executed only by 'genesis'
     """
     
     num_cpus = args['num_cpus']
@@ -523,169 +523,177 @@ def read_data(args, func_loader, runmode):
         chunks = int(np.ceil(N / args['pickle_size']))
         return aux.split_start_end(range(N), chunks)
 
-    cache_directory = aux.makedir(f'{args["datadir"]}/data_{args["__hash_genesis__"]}')
+    cache_directory = aux.makedir(os.path.join(args["datadir"], f'data__{args["__hash_genesis__"]}'))
 
-    if args['__use_cache__'] == False or (not os.path.exists(f'{cache_directory}/output_0.pkl')):
+    # Check do we have already computed pickles ready
+    if (os.path.exists(os.path.join(cache_directory, 'output_0.pkl')) and args['__use_cache__']):
+        print(f'Found existing pickle data under: {cache_directory} and --use_cache 1. [done] ', 'green')
+        return
+    
+    # func_loader does the multifile processing
+    load_args = {'entry_start': 0, 'entry_stop': None, 'maxevents': args['maxevents'], 'args': args}
+    data      = func_loader(root_path=args['root_files'], **load_args)
+    
+    X    = data['X']
+    Y    = data['Y']
+    W    = data['W']
+    ids  = data['ids']
+    info = data['info']
 
-        if runmode != "genesis":
-            if args['__use_cache__'] == False:
-                raise Exception(__name__ + f'.read_data: [--use_cache 0] is to be used only with [--runmode genesis]')
+    C = get_chunk_ind(N=len(X))
+    
+    print(f'Saving {len(C)} pickle files to path: "{cache_directory}"', 'yellow')
 
-            raise Exception(__name__ + f'.read_data: Data "{cache_directory}" not found [execute --runmode genesis and set --maxevents N]')
-        
-        # func_loader does the multifile processing
-        load_args = {'entry_start': 0, 'entry_stop': None, 'maxevents': args['maxevents'], 'args': args}
-        data   = func_loader(root_path=args['root_files'], **load_args)
-        
-        X    = data['X']
-        Y    = data['Y']
-        W    = data['W']
-        ids  = data['ids']
-        info = data['info']
+    ## New code
+    
+    def save_pickle(i):
+        with open(os.path.join(cache_directory, f'output_{i}.pkl'), 'wb') as handle:
+            pickle.dump([X[C[i][0]:C[i][-1]], Y[C[i][0]:C[i][-1]], W[C[i][0]:C[i][-1]], ids, info, args], 
+                        handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        C = get_chunk_ind(N=len(X))
-        
-        print(f'Saving {len(C)} pickle files to path: "{cache_directory}"', 'yellow')
+    tic = time.time()
+    
+    # Create a thread pool
+    max_workers = multiprocessing.cpu_count() // 2 if num_cpus == 0 else num_cpus
+    max_workers = min(len(C), max_workers)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Map the save_pickle function to each index in the range
+        list(tqdm(executor.map(save_pickle, range(len(C))), total=len(C)))
 
-        ## New code
-        
-        def save_pickle(i):
-            with open(f'{cache_directory}/output_{i}.pkl', 'wb') as handle:
-                pickle.dump([X[C[i][0]:C[i][-1]], Y[C[i][0]:C[i][-1]], W[C[i][0]:C[i][-1]], ids, info, args], 
-                            handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        tic = time.time()
-        
-        # Create a thread pool
-        max_workers = multiprocessing.cpu_count() // 2 if num_cpus == 0 else num_cpus
-        max_workers = min(len(C), max_workers)
-        
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Map the save_pickle function to each index in the range
-            list(tqdm(executor.map(save_pickle, range(len(C))), total=len(C)))
-
-        toc = time.time() - tic
-        print(f'Saving took {toc:0.2f} sec')
-        
-        # Save args
-        aux.yaml_dump(data=args, filename=f'{args["datadir"]}/data_{args["__hash_genesis__"]}.yml')
-        
-        """
-        # OLD code
-        
-        tic = time.time()
-        
-        for i in tqdm(range(len(C))):
-            with open(f'{cache_directory}/output_{i}.pkl', 'wb') as handle:
-                pickle.dump([X[C[i][0]:C[i][-1]], Y[C[i][0]:C[i][-1]], W[C[i][0]:C[i][-1]], ids, info, args], \
-                    handle, protocol=pickle.HIGHEST_PROTOCOL)
-        
-        toc = time.time() - tic
-        print(f'Saving took {toc:0.2f} sec')
-        """
-        
-        gc.collect()
-        io.showmem()
-        
-        print('[done]')
-        
-        return data
-        
-    else:
-        
-        if runmode == "genesis": # Genesis mode does not need this
-            print(f'"genesis" already done and the cache files are ready.', 'green')
-            return
-        
-        ## New version
-        
-        """    
-        Using ThreadPool, not fully parallel because of GIL (Global Interpreter Lock), but
-        should keep memory in control (vs. ProcessPool uses processes, but memory can be a problem)
-        """
-        
-        files        = os.listdir(cache_directory)
-        sorted_files = sorted(files, key=lambda x: int(os.path.splitext(x)[0].split('_')[1]))
-        
-        filepaths = [os.path.join(cache_directory, f) for f in sorted_files]
-        num_files = len(filepaths)
-        
-        print(f'Loading {num_files} pickle files from path: "{cache_directory}"')
-        print('')
-        print(sorted_files)
-        print('')
-        
-        data = [None] * num_files
-        
-        tic = time.time()
-        
-        max_workers = multiprocessing.cpu_count() // 2 if num_cpus == 0 else num_cpus
-        max_workers = min(num_files, max_workers)
-        
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_index = {executor.submit(load_file_wrapper, i, fp): i for i, fp in enumerate(filepaths)}
-            for future in tqdm(as_completed(future_to_index), total=num_files):
-                try:
-                    index, (X_, Y_, W_, ids, info, genesis_args) = future.result()
-                    data[index] = (X_, Y_, W_)
-                except Exception as e:
-                    msg = f'Error loading file: {filepaths[future_to_index[future]]} -- {e}'
-                    raise Exception(msg)
-                
-                finally:
-                    del future  # Ensure the future is deleted to free memory
-        
-        toc = time.time() - tic
-        print(f'Loading took {toc:0.2f} sec')
-        
-        X, Y, W = concatenate_data(data=data, max_batch_size=args['tech']['concat_max_pickle'])
-        gc.collect()  # Call garbage collection once after the loop
-        
-        """
-        ## Old version
-        
-        num_files = io.count_files_in_dir(cache_directory)
-        print(f'Loading from path: "{cache_directory}"', 'yellow')
-        
-        tic = time.time()
-        for i in tqdm(range(num_files)):
-            
-            with open(f'{cache_directory}/output_{i}.pkl', 'rb') as handle:
-                X_, Y_, W_, ids, info, genesis_args = pickle.load(handle)
-
-                if i > 0:
-                    X = np.concatenate((X, X_), axis=0) # awkward will cast numpy automatically
-                    Y = np.concatenate((Y, Y_), axis=0)
-                    W = np.concatenate((W, W_), axis=0)
-                else:
-                    X,Y,W = copy.deepcopy(X_), copy.deepcopy(Y_), copy.deepcopy(W_)
-                
-                gc.collect() # important!
-        toc = time.time() - tic
-        print(f'Took {toc:0.2f} sec')
-        """
-        
-        io.showmem()
-        print('[done]')
-        
-        return {'X':X, 'Y':Y, 'W':W, 'ids':ids, 'info':info}
+    toc = time.time() - tic
+    print(f'Saving took {toc:0.2f} sec')
+    
+    # Save args
+    aux.yaml_dump(data=args, filename=os.path.join(args["datadir"], f'data__{args["__hash_genesis__"]}.yml'))
+    
+    """
+    # OLD code
+    
+    tic = time.time()
+    
+    for i in tqdm(range(len(C))):
+        with open(os.path.join(cache_directory, f'output_{i}.pkl'), 'wb') as handle:
+            pickle.dump([X[C[i][0]:C[i][-1]], Y[C[i][0]:C[i][-1]], W[C[i][0]:C[i][-1]], ids, info, args], \
+                handle, protocol=pickle.HIGHEST_PROTOCOL)
+    
+    toc = time.time() - tic
+    print(f'Saving took {toc:0.2f} sec')
+    """
+    
+    gc.collect()
+    io.showmem()
+    
+    print('[done]')
+    
+    return
 
 @iceprint.icelog(LOGGER)
-def read_data_processed(args, func_loader, func_factor, mvavars, runmode):
+def combine_pickle_data(args):
+    """
+    Load splitted pickle data and return full dataset arrays
+    
+    Args:
+        args: main argument dictionary
+    """
+    
+    num_cpus = args['num_cpus']
+    
+    cache_directory = aux.makedir(os.path.join(args["datadir"], f'data__{args["__hash_genesis__"]}'))
+    
+    if not os.path.exists(os.path.join(cache_directory, 'output_0.pkl')):
+        raise Exception(__name__ + f'.process_pickle_data: No genesis stage pickle data under "{cache_directory}" [execute --runmode genesis and set --maxevents N]')
+    
+    ## New version
+    
+    """    
+    Using ThreadPool, not fully parallel because of GIL (Global Interpreter Lock), but
+    should keep memory in control (vs. ProcessPool uses processes, but memory can be a problem)
+    """
+    
+    files        = os.listdir(cache_directory)
+    sorted_files = sorted(files, key=lambda x: int(os.path.splitext(x)[0].split('_')[1]))
+    
+    filepaths = [os.path.join(cache_directory, f) for f in sorted_files]
+    num_files = len(filepaths)
+    
+    print(f'Loading {num_files} pickle files from path: "{cache_directory}"')
+    print('')
+    print(sorted_files)
+    print('')
+    
+    data = [None] * num_files
+    
+    tic = time.time()
+    
+    max_workers = multiprocessing.cpu_count() // 2 if num_cpus == 0 else num_cpus
+    max_workers = min(num_files, max_workers)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {executor.submit(load_file_wrapper, i, fp): i for i, fp in enumerate(filepaths)}
+        for future in tqdm(as_completed(future_to_index), total=num_files):
+            try:
+                index, (X_, Y_, W_, ids, info, genesis_args) = future.result()
+                data[index] = (X_, Y_, W_)
+            except Exception as e:
+                msg = f'Error loading file: {filepaths[future_to_index[future]]} -- {e}'
+                raise Exception(msg)
+            
+            finally:
+                del future  # Ensure the future is deleted to free memory
+    
+    toc = time.time() - tic
+    print(f'Loading took {toc:0.2f} sec')
+    
+    X, Y, W = concatenate_data(data=data, max_batch_size=args['tech']['concat_max_pickle'])
+    gc.collect()  # Call garbage collection once after the loop
+    
+    """
+    ## Old version
+    
+    num_files = io.count_files_in_dir(cache_directory)
+    print(f'Loading from path: "{cache_directory}"', 'yellow')
+    
+    tic = time.time()
+    for i in tqdm(range(num_files)):
+        
+        with open(os.path.join(cache_directory, f'output_{i}.pkl'), 'rb') as handle:
+            X_, Y_, W_, ids, info, genesis_args = pickle.load(handle)
+
+            if i > 0:
+                X = np.concatenate((X, X_), axis=0) # awkward will cast numpy automatically
+                Y = np.concatenate((Y, Y_), axis=0)
+                W = np.concatenate((W, W_), axis=0)
+            else:
+                X,Y,W = copy.deepcopy(X_), copy.deepcopy(Y_), copy.deepcopy(W_)
+            
+            gc.collect() # important!
+    toc = time.time() - tic
+    print(f'Took {toc:0.2f} sec')
+    """
+    
+    io.showmem()
+    print('[done]')
+    
+    return {'X':X, 'Y':Y, 'W':W, 'ids':ids, 'info':info}
+
+
+@iceprint.icelog(LOGGER)
+def train_eval_data_processor(args, func_factor, mvavars, runmode):
     """
     Read/write (MVA) data and return full processed dataset
     """
 
     # --------------------------------------------------------------------
-    # 'DATA': Raw input reading and processing
+    # 1. Pickle data combiner step
     
-    cache_filename = f'{args["datadir"]}/data_{runmode}_{args["__hash_genesis__"]}.pkl'
+    cache_filename = os.path.join(args["datadir"], f'data__{args["__hash_genesis__"]}.pkl')
     
     if args['__use_cache__'] == False or (not os.path.exists(cache_filename)):
 
         print(f'File "{cache_filename}" for <DATA> does not exist, creating.', 'yellow')
         
-        data = read_data(args=args, func_loader=func_loader, runmode=runmode) 
+        data = combine_pickle_data(args=args) 
         
         with open(cache_filename, 'wb') as handle:
             print(f'Saving <DATA> to a pickle file: "{cache_filename}"', 'yellow')
@@ -718,16 +726,16 @@ def read_data_processed(args, func_loader, func_factor, mvavars, runmode):
     print('[done]')
     
     # --------------------------------------------------------------------
-    # 'PROCESSED DATA': Further processing step
+    # 2. High level data step
     
-    cache_filename = f'{args["datadir"]}/processed_data_{runmode}_{args["__hash_post_genesis__"]}.pkl'
+    cache_filename = os.path.join(args["datadir"], f'processed_data__{runmode}__{args["__hash_post_genesis__"]}.pkl')
     
     if args['__use_cache__'] == False or (not os.path.exists(cache_filename)):
         
         print(f'File "{cache_filename}" for <PROCESSED DATA> does not exist, creating.', 'yellow')
         
         # Process it
-        processed_data = process_data(args=args, predata=data, func_factor=func_factor, mvavars=mvavars, runmode=runmode)
+        processed_data = process_data(args=args, data=data, func_factor=func_factor, mvavars=mvavars, runmode=runmode)
         
         with open(cache_filename, 'wb') as handle:
             print(f'Saving <PROCESSED DATA> to a pickle file: "{cache_filename}"', 'yellow')
@@ -762,17 +770,18 @@ def read_data_processed(args, func_loader, func_factor, mvavars, runmode):
     
     return processed_data
 
-@iceprint.icelog(LOGGER)
-def process_data(args, predata, func_factor, mvavars, runmode):
-    """
-    Process data further
-    """
 
-    X    = predata['X']
-    Y    = predata['Y']
-    W    = predata['W']
-    ids  = predata['ids']
-    info = predata['info']
+@iceprint.icelog(LOGGER)
+def process_data(args, data, func_factor, mvavars, runmode):
+    """
+    Process data to high level representations and split to train/eval/test
+    """
+    
+    X    = data['X']
+    Y    = data['Y']
+    W    = data['W']
+    ids  = data['ids']
+    info = data['info']
     
     # ----------------------------------------------------------
     # Pop out conditional variables if they exist and no conditional training is used
@@ -821,7 +830,13 @@ def process_data(args, predata, func_factor, mvavars, runmode):
         
         permute = args['permute'] if 'permute' in args else True
         trn, val, tst = io.split_data(X=X, Y=Y, W=W, ids=ids, frac=args['frac'], permute=permute)
-       
+    
+    # ----------------------------------------------------------
+    # ** Re-permute train and validation events for safety **
+    trn = trn.permute(np.random.permutation(len(trn.x)))
+    val = val.permute(np.random.permutation(len(val.x)))
+    # ----------------------------------------------------------    
+    
     # ----------------------------------------------------------
     if args['imputation_param']['active']:
         module = import_module(mvavars, 'configs.subpkg')
@@ -842,9 +857,9 @@ def process_data(args, predata, func_factor, mvavars, runmode):
         if args['reweight']:
             
             if args["reweight_file"] is None:
-                fmodel = f'{args["datadir"]}/reweighter_{args["__hash_genesis__"]}.pkl' 
+                fmodel = os.path.join(args["datadir"], f'reweighter__{args["__hash_genesis__"]}.pkl') 
             else:
-                fmodel = f'{args["datadir"]}/{args["reweight_file"]}'
+                fmodel = os.path.join(args["datadir"], args["reweight_file"])
             
             if 'load' in args['reweight_mode']:
                 print(f'Loading reweighting model from: {fmodel} [runmode = {runmode}]', 'green')
@@ -883,7 +898,7 @@ def process_data(args, predata, func_factor, mvavars, runmode):
             output['trn']['data'], imputer = impute_datasets(data=output['trn']['data'], features=impute_vars, args=args['imputation_param'], imputer=None)
             output['val']['data'], imputer = impute_datasets(data=output['val']['data'], features=impute_vars, args=args['imputation_param'], imputer=imputer)
             
-            fmodel = f'{args["modeldir"]}/imputer.pkl'
+            fmodel = os.path.join(args["modeldir"], 'imputer.pkl')
             
             print(f'Saving imputer to: {fmodel}', 'green')
             pickle.dump(imputer, open(fmodel, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
@@ -894,9 +909,9 @@ def process_data(args, predata, func_factor, mvavars, runmode):
         if args['reweight']:
             
             if args["reweight_file"] is None:
-                fmodel = f'{args["datadir"]}/reweighter_{args["__hash_genesis__"]}.pkl' 
+                fmodel = os.path.join(args["datadir"], f'reweighter__{args["__hash_genesis__"]}.pkl') 
             else:    
-                fmodel = f'{args["datadir"]}/{args["reweight_file"]}' 
+                fmodel = os.path.join(args["datadir"], args["reweight_file"]) 
             
             if 'load' in args['reweight_mode']:
                 print(f'Loading reweighting model from: {fmodel} [runmode = {runmode}]', 'green')
@@ -926,7 +941,7 @@ def process_data(args, predata, func_factor, mvavars, runmode):
         ## Imputate
         if args['imputation_param']['active']:
             
-            fmodel = f'{args["modeldir"]}/imputer.pkl'
+            fmodel = os.path.join(args["modeldir"], f'imputer.pkl')
             
             print(f'Loading imputer from: {fmodel}', 'green')
             imputer = pickle.load(open(fmodel, 'rb'))
@@ -1004,20 +1019,19 @@ def train_models(data_trn, data_val, args=None):
     # -----------------------------
     # Prepare output folders
 
-    targetdir  = f'{args["plotdir"]}/train'
+    targetdir = os.path.join(f'{args["plotdir"]}', 'train')
 
     subdirs = ['']
     for sd in subdirs:
-        os.makedirs(targetdir + '/' + sd, exist_ok = True)
+        os.makedirs(os.path.join(targetdir, sd), exist_ok = True)
     # ----------------------------------
     
     # Print training stats
-    output_file = f'{args["plotdir"]}/train/stats_train_weights.log'
+    output_file = os.path.join(args["plotdir"], 'train', 'stats_train_weights.log')
     prints.print_weights(weights=data_trn['data'].w, y=data_trn['data'].y, output_file=output_file)
     
-    output_file = f'{args["plotdir"]}/train/stats_validate_weights.log'
+    output_file = os.path.join(args["plotdir"], 'train', 'stats_validate_weights.log')
     prints.print_weights(weights=data_val['data'].w, y=data_val['data'].y, output_file=output_file)
-    
     
     # @@ Tensor normalization @@
     if data_trn['data_tensor'] is not None and (args['varnorm_tensor'] == 'zscore'):
@@ -1030,7 +1044,8 @@ def train_models(data_trn, data_val, args=None):
         data_val['data_tensor'] = io.apply_zscore_tensor(data_val['data_tensor'], X_mu_tensor, X_std_tensor)
         
         # Save it for the evaluation
-        pickle.dump({'X_mu_tensor': X_mu_tensor, 'X_std_tensor': X_std_tensor}, open(args["modeldir"] + '/zscore_tensor.pkl', 'wb'), protocol=pickle.HIGHEST_PROTOCOL)    
+        pickle.dump({'X_mu_tensor': X_mu_tensor, 'X_std_tensor': X_std_tensor},
+                    open(os.path.join(args["modeldir"], 'zscore_tensor.pkl'), 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
     
     # --------------------------------------------------------------------
     
@@ -1112,10 +1127,11 @@ def train_models(data_trn, data_val, args=None):
         data_val['data'].x  = io.apply_zscore(data_val['data'].x, X_mu, X_std)
 
         # Save it for the evaluation
-        pickle.dump({'X_mu': X_mu, 'X_std': X_std, 'ids': data_trn['data'].ids}, open(args['modeldir'] + '/zscore.pkl', 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump({'X_mu': X_mu, 'X_std': X_std, 'ids': data_trn['data'].ids},
+                    open(os.path.join(args["modeldir"], 'zscore.pkl'), 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
         
         # Print train
-        output_file = f'{args["plotdir"]}/train/stats_train_{args["varnorm"]}.log'
+        output_file = os.path.join(f'{args["plotdir"]}', 'train', f'stats_train_{args["varnorm"]}.log')
         prints.print_variables(data_trn['data'].x, data_trn['data'].ids, W=data_trn['data'].w, output_file=output_file)
 
     elif args['varnorm'] == 'madscore' :
@@ -1128,10 +1144,11 @@ def train_models(data_trn, data_val, args=None):
         data_val['data'].x = io.apply_zscore(data_val['data'].x, X_m, X_mad)
 
         # Save it for the evaluation
-        pickle.dump({'X_m': X_m, 'X_mad': X_mad, 'ids': data_trn['data'].ids}, open(args['modeldir'] + '/madscore.pkl', 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump({'X_m': X_m, 'X_mad': X_mad, 'ids': data_trn['data'].ids},
+                    open(os.path.join(args["modeldir"], 'madscore.pkl'), 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
         
         # Print train
-        output_file = f'{args["plotdir"]}/train/stats_train_{args["varnorm"]}.log'
+        output_file = os.path.join(f'{args["plotdir"]}', 'train', f'stats_train_{args["varnorm"]}.log')
         prints.print_variables(data_trn['data'].x, data_trn['data'].ids, W=data_trn['data'].w, output_file=output_file)
 
     # -------------------------------------------------------------
@@ -1298,7 +1315,7 @@ def train_models(data_trn, data_val, args=None):
                 else:
                     raise Exception(__name__ + f".train_models: Unsupported distillation source <{param['train']}>")
             # --------------------------------------------------------
-
+        
         except KeyboardInterrupt:
             print(f'CTRL+C catched -- continue with the next model', 'red')
         
@@ -1357,16 +1374,16 @@ def evaluate_models(data=None, info=None, args=None):
     # -----------------------------
     # Prepare output folders
 
-    targetdir  = f'{args["plotdir"]}/eval'
+    targetdir = os.path.join(f'{args["plotdir"]}', 'eval')
 
     subdirs = ['', 'ROC', 'MVA', 'COR']
     for sd in subdirs:
-        os.makedirs(targetdir + '/' + sd, exist_ok = True)
+        os.makedirs(os.path.join(targetdir, sd), exist_ok = True)
 
     # --------------------------------------------------------------------
     
     # Print evaluation stats
-    output_file = f'{args["plotdir"]}/eval/stats_eval_weights.log'
+    output_file = os.path.join(args["plotdir"], 'eval', 'stats_eval_weights.log')
     prints.print_weights(weights=data['data'].w, y=data['data'].y, output_file=output_file)
     
     
@@ -1427,7 +1444,7 @@ def evaluate_models(data=None, info=None, args=None):
         if data['data_tensor'] is not None and (args['varnorm_tensor'] == 'zscore'):
             
             print('\nZ-score normalizing tensor variables ...', 'magenta')
-            Z_data = pickle.load(open(args["modeldir"] + '/zscore_tensor.pkl', 'rb'))
+            Z_data = pickle.load(open(os.path.join(args["modeldir"], 'zscore_tensor.pkl'), 'rb'))
             X_mu_tensor  = Z_data['X_mu_tensor']
             X_std_tensor = Z_data['X_std_tensor']
             
@@ -1437,25 +1454,25 @@ def evaluate_models(data=None, info=None, args=None):
         if   args['varnorm'] == 'zscore' or args['varnorm'] == 'zscore-weighted':
             
             print('\nZ-score normalizing variables ...', 'magenta')
-            Z_data = pickle.load(open(args["modeldir"] + '/zscore.pkl', 'rb'))
+            Z_data = pickle.load(open(os.path.join(args["modeldir"], 'zscore.pkl'), 'rb'))
             X_mu   = Z_data['X_mu']
             X_std  = Z_data['X_std']
             
             X = io.apply_zscore(X, X_mu, X_std)
             
-            output_file = f'{args["plotdir"]}/eval/stats_variables_{args["varnorm"]}.log'
+            output_file = os.path.join(args["plotdir"], 'eval', f'stats_variables_{args["varnorm"]}.log')
             prints.print_variables(X, ids, weights, output_file=output_file)
 
         elif args['varnorm'] == 'madscore':
             
             print('\nMAD-score normalizing variables ...', 'magenta')
-            Z_data = pickle.load(open(args["modeldir"] + '/madscore.pkl', 'rb'))
+            Z_data = pickle.load(open(os.path.join(args["modeldir"], 'madscore.pkl'), 'rb'))
             X_m    = Z_data['X_m']
             X_mad  = Z_data['X_mad']
             
             X = io.apply_madscore(X, X_m, X_mad)
             
-            output_file = f'{args["plotdir"]}/eval/stats_variables_{args["varnorm"]}.log'
+            output_file = os.path.join(args["plotdir"], 'eval', f'stats_variables_{args["varnorm"]}.log')
             prints.print_variables(X, ids, weights, output_file=output_file)
         
     except Exception as e:
@@ -1590,7 +1607,7 @@ def evaluate_models(data=None, info=None, args=None):
 
                 if args['plot_param']['contours']['active']:
                     plots.plot_contour_grid(pred_func=func_predict, X=X_RAW, y=y, ids=ids_RAW, transform='numpy', 
-                        targetdir=aux.makedir(f'{args["plotdir"]}/eval/2D-contours/{param["label"]}/'))
+                        targetdir=aux.makedir(os.path.join(f'{args["plotdir"]}', 'eval/2D-contours', f'{param["label"]}')))
             else:
                 raise Exception(__name__ + f'.Unknown param["predict"] = {param["predict"]} for ID = {ID}')
     
@@ -1616,7 +1633,7 @@ def evaluate_models(data=None, info=None, args=None):
                'ROC_binned_mlabel': ROC_binned_mlabel,
                'info':              info}
     
-    targetfile = targetdir + '/eval_results.pkl'
+    targetfile = os.path.join(targetdir, 'eval_results.pkl')
     print(f'Saving pickle output to:')
     print(f'{targetfile}')
     

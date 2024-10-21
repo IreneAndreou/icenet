@@ -2,12 +2,12 @@
 # 
 # Execute training and evaluation for HGCAL
 # 
-# Run with: source runme.sh
+# Run with: maxevents=10000; source tests/runme.sh
 
 CONFIG="tune0_cnd.yml"
 
-#DATAPATH="./travis-stash/input/hgcal"
-DATAPATH="/home/user/travis-stash/input/icehgcal"
+#DATAPATH="./actions-stash/input/hgcal"
+DATAPATH="/home/user/actions-stash/input/icehgcal"
 
 if [ ${maxevents+x} ]; then MAX="--maxevents $maxevents"; else MAX=""; fi
 

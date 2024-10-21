@@ -2,10 +2,10 @@
 #
 # Execute "image matrix" visualization for electron ID
 #
-# Run with: source runme.sh
+# Run with: maxevents=10000; source tests/runme.sh
 
 CONFIG="tune0.yml"
-DATAPATH="./travis-stash/input/iceid"
+DATAPATH="./actions-stash/input/iceid"
 
 if [ ${maxevents+x} ]; then MAX="--maxevents $maxevents"; else MAX=""; fi
 

@@ -236,7 +236,7 @@ def _binary_cross_entropy(preds: torch.Tensor, targets: torch.Tensor, weights: t
     
     SWD_loss = torch.tensor(0.0).to(device)
     
-    if SWD_param is not None:
+    if (SWD_param is not None) and (abs(SWD_param["beta"]) > 1E-15):
         
         # Total maximum is limited, pick random subsample
         if SWD_param['max_N'] is not None and targets.shape[0] > SWD_param['max_N']:
@@ -474,7 +474,9 @@ def train_xgb(config={'params': {}}, data_trn=None, data_val=None, y_soft=None, 
     
     loss_history_train = {}
     loss_history_eval  = {}
-
+    
+    # --------------------------------------------------------------
+    
     # TensorboardX
     if not args['__raytune_running__'] and param['tensorboard']:
         from tensorboardX import SummaryWriter
@@ -527,7 +529,7 @@ def train_xgb(config={'params': {}}, data_trn=None, data_val=None, y_soft=None, 
     # ---------------------------------------------------------
     # Choose weight mode
     if np.min(w_trn) < 0.0 or np.min(w_val) < 0.0:
-        print(f'Negative weights in the sample -- handled via custom loss')
+        print(f'Negative weights in the sample -- handled via custom loss', 'magenta')
         out_weights_on = True
         
         if not use_custom:
@@ -572,7 +574,7 @@ def train_xgb(config={'params': {}}, data_trn=None, data_val=None, y_soft=None, 
     
     if 'opt_param' in param:
         
-        if 'noise_reg' in param['opt_param'] and param['opt_param']['noise_reg'] > 0.0:
+        if ('noise_reg' in param['opt_param']) and (abs(param['opt_param']['noise_reg']) > 1E-15):
             X_trn_orig = copy.deepcopy(X_trn)
             noise_reg  = param['opt_param']['noise_reg']
     # -------------------------------------------
@@ -592,7 +594,7 @@ def train_xgb(config={'params': {}}, data_trn=None, data_val=None, y_soft=None, 
         # ---------------------------------------
         
         ## What to evaluate
-        if epoch == 0 or ((epoch+1) % param['evalmode']) == 0 or args['__raytune_running__']:
+        if epoch == 0 or ((epoch+1) % param['savemode']) == 0 or args['__raytune_running__']:
             evallist = [(dtrain, 'train'), (deval, 'eval')]
         else:
             evallist = [(dtrain, 'train')]
@@ -620,30 +622,30 @@ def train_xgb(config={'params': {}}, data_trn=None, data_val=None, y_soft=None, 
             x         = copy.deepcopy(data_trn.x)
             MI_x      = copy.deepcopy(data_trn_MI)
             
+            # Custom loss string of type 'custom_loss:loss_name:hessian:hessian_mode'
+            
             if strs[1] == 'binary_cross_entropy':
                 
-                if len(strs) == 3 and 'hessian' in strs[2]:
-                    print('Using Hessian with custom loss')
-                    skip_hessian = False
+                if 'hessian' in strs:
+                    hessian_mode = strs[strs.index('hessian')+1]
                 else:
-                    skip_hessian = True
+                    hessian_mode = 'constant'
                 
-                a['obj'] = autogradxgb.XgboostObjective(loss_func=_binary_cross_entropy, skip_hessian=skip_hessian, device=device)
+                a['obj'] = autogradxgb.XgboostObjective(loss_func=_binary_cross_entropy, hessian_mode=hessian_mode, device=device)
                 a['params']['disable_default_eval_metric'] = 1
             
             elif strs[1] == 'sliced_wasserstein':
                 
-                if len(strs) == 3 and 'hessian' in strs[2]:
-                    print('Using Hessian with custom loss')
-                    skip_hessian = False
+                if 'hessian' in strs:
+                    hessian_mode = strs[strs.index('hessian')+1]
                 else:
-                    skip_hessian = True
+                    hessian_mode = 'constant'
                 
-                a['obj'] = autogradxgb.XgboostObjective(loss_func=_sliced_wasserstein, skip_hessian=skip_hessian, device=device)
+                a['obj'] = autogradxgb.XgboostObjective(loss_func=_sliced_wasserstein, hessian_mode=hessian_mode, device=device)
                 a['params']['disable_default_eval_metric'] = 1
             
             else:
-                raise Exception(__name__ + f'.train_xgb: Unknown custom loss {strs[1]}')
+                raise Exception(__name__ + f'.train_xgb: Unknown custom loss {strs[1]} (check syntax)')
             
             #!
             del a['params']['eval_metric']
@@ -665,7 +667,7 @@ def train_xgb(config={'params': {}}, data_trn=None, data_val=None, y_soft=None, 
         
         # ==============================================
         ## Validate
-        if epoch == 0 or ((epoch+1) % param['evalmode']) == 0 or args['__raytune_running__']:
+        if epoch == 0 or ((epoch+1) % param['savemode']) == 0 or args['__raytune_running__']:
             
             # ------- AUC values ------
             if len(args['primary_classes']) >= 2:
