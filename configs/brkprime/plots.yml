@@ -14,7 +14,7 @@ contours:
 ROC:
   active: true
   num_bootstrap: 200
-  xmin: 1.0E-4
+  xmin: 1.0E-7
 
 ## Binned ROC plots can be 1D or 2D
 ROC_binned:
