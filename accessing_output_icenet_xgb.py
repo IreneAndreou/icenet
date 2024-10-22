@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import mplhep as hep
 from matplotlib.gridspec import GridSpec
 import os
+from scipy.stats import ks_2samp
+from tqdm import tqdm
 
 # File path to the best model
 file_path = 'checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-15_11-08-01_lx06/XGB/XGB_44.pkl'  # best model - latest training (val_loss: 0.6226)
@@ -54,14 +56,13 @@ if 'model' in data:
         probabilities = model.predict(dtest)
         probabilities = 1 - probabilities
         new_weights = probabilities / (1 - probabilities)
-        print(f"Processed batch {batch_index + 1}")
         return new_weights
 
     batch_size = 10000
     num_batches = len(df) // batch_size + 1
 
     new_weights_list = []
-    for i in range(num_batches):
+    for i in tqdm(range(num_batches), desc="Processing batches"):
         batch_df = df.iloc[i * batch_size:(i + 1) * batch_size]
         new_weights = process_batch(batch_df, i)
         new_weights_list.append(new_weights)
@@ -101,7 +102,7 @@ if 'model' in data:
     # Define bins for discrete features (if any)
     discrete_bins = {
         'n_jets': np.arange(0, 11, 1),
-        'n_deepbjets': np.arange(0, 2, 1)
+        'n_deepbjets': np.arange(0, 3, 1)
     }
 
     for i, branch in enumerate(feature_names):
@@ -119,7 +120,7 @@ if 'model' in data:
         combined_hist_uncerts = np.zeros(len(bin_edges) - 1)
         single_muon_hist_uncerts = np.zeros(len(bin_edges) - 1)
 
-        for j in range(num_batches):
+        for j in tqdm(range(num_batches), desc=f"Updating histograms for {branch}"):
             batch_df = df.iloc[j * batch_size:(j + 1) * batch_size]
             batch_original_weights = original_weights[j * batch_size:(j + 1) * batch_size]
             batch_combined_weights = combined_weights[j * batch_size:(j + 1) * batch_size]
@@ -136,8 +137,6 @@ if 'model' in data:
             combined_hist_uncerts += np.sqrt(np.sum(batch_combined_weights * batch_combined_weights))
             single_muon_hist_uncerts += np.sqrt(np.sum(single_muon_counts))
 
-            print(f"Updated histogram for batch {j + 1} for feature {branch}")
-
         # Calculate bin centers
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -148,9 +147,9 @@ if 'model' in data:
         ratio_combined = np.divide(single_muon_hist_counts, combined_hist_counts, out=np.zeros_like(single_muon_hist_counts), where=combined_hist_counts != 0)
 
         # Calculate statistical uncertainties
-        original_uncert = original_hist_uncerts#np.sqrt(original_hist_counts)
-        combined_uncert = combined_hist_uncerts#np.sqrt(combined_hist_counts)
-        single_muon_uncert = single_muon_hist_uncerts#np.sqrt(single_muon_hist_counts)
+        original_uncert = original_hist_uncerts
+        combined_uncert = combined_hist_uncerts
+        single_muon_uncert = single_muon_hist_uncerts
 
         # Calculate chi-squared for original weights
         chi_squared_original = np.sum((single_muon_hist_counts - original_hist_counts) ** 2 / (original_uncert ** 2 + single_muon_uncert ** 2))
@@ -161,6 +160,14 @@ if 'model' in data:
         chi_squared_combined = np.sum((single_muon_hist_counts - combined_hist_counts) ** 2 / (combined_uncert ** 2 + single_muon_uncert ** 2))
         print(f"Chi-squared for combined weights for feature {branch}: {chi_squared_combined}")
         print(f"Reduced chi-squared for combined weights for feature {branch}: {chi_squared_combined / (num_bins[branch] - 1)}")
+
+        # Perform K-S test for original weights
+        ks_stat_original, ks_pvalue_original = ks_2samp(single_muon_hist_counts, original_hist_counts)
+        print(f"K-S test for original weights for feature {branch}: statistic={ks_stat_original}, p-value={ks_pvalue_original}")
+
+        # Perform K-S test for combined weights
+        ks_stat_combined, ks_pvalue_combined = ks_2samp(single_muon_hist_counts, combined_hist_counts)
+        print(f"K-S test for combined weights for feature {branch}: statistic={ks_stat_combined}, p-value={ks_pvalue_combined}")
 
         fig = plt.figure(figsize=(20, 10))
         gs = GridSpec(2, 2, height_ratios=[3, 1])
