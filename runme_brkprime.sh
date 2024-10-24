@@ -12,6 +12,8 @@ source /vols/cms/ia2318/miniconda3/etc/profile.d/conda.sh
 #Activate the virtual environment
 conda activate icenet
 
+source /vols/software/cuda/setup.sh 11.8.0
+
 # Set CUDA environment variables
 export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
