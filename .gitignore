@@ -11,6 +11,7 @@
 *.zip
 *.text
 *.log
+*.png
 #*.json
 #*.txt
 
@@ -31,7 +32,11 @@ output/
 testfigs/
 tbfigs/
 tmp/
-
+best_models/
+best_models_nn/
+best_models_old_include_os/
+ff_plots_tau_1_vars_mybdt_ss_Run3_2022/
+ff_plots_tau_1_vars_mybdt_ss_Run3_2022_unbalanced/
 # torch-geometric test data
 tests/Planetoid
 
