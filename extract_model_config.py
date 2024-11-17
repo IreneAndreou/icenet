@@ -1,7 +1,7 @@
 import torch
 
 # Replace 'your_file.pth' with the path to your .pth file
-file_path = '/vols/cms/ia2318/icenet/checkpoint/brkprime/config__tune0.yml/modeltag__None/2024-10-03_10-58-45_lx06/DMLP/DMLP_49.pth'
+file_path = 'best_model.pth'
 
 # Load the checkpoint
 checkpoint = torch.load(file_path)

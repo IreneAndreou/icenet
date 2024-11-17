@@ -58,8 +58,8 @@ genesis_runmode:
   maxevents:  null
   inputmap:   null # "mc_input.yml"
   
-  mcfile:    'data/Tau_mc_events.root' #'data/sampled/DY_all_events.root'
-  datafile:  'data/Tau_data_events.root' #'data/sampled/SingleMuon_all_events.root'
+  mcfile:    'data/Tau_mc_events_sublead.root' #'data/sampled/DY_all_events.root'
+  datafile:  'data/Tau_data_events_sublead.root' #'data/sampled/SingleMuon_all_events.root'
   tree_name:  null                    # 'ntuplizer/tree'
 
   targetfunc: null                    # Training target,    implemented under mctargets.py
